@@ -1,0 +1,19 @@
+{
+  "name": "minemanager-js",
+  "version": "1.0.0",
+  "description": "A server wrapper for Spigot & BungeeCord",
+  "main": "index.js",
+  "author": "crashoz",
+  "license": "MIT",
+  "dependencies": {
+    "bluebird": "^3.5.1",
+    "chai": "^4.1.2",
+    "express": "^4.16.2",
+    "fs-extra": "^5.0.0",
+    "mocha": "^4.1.0",
+    "moment": "^2.20.1",
+    "mysql": "^2.15.0",
+    "stream-splitter": "^0.3.2",
+    "winston": "^2.4.0"
+  }
+}
