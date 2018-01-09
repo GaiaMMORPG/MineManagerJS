@@ -1,5 +1,5 @@
 const readline = require('readline');
-const SpigotServer = require('./minecraft')
+const ServerNetwork = require('./ServerNetwork')
 
 let rl = readline.createInterface({
   input: process.stdin,
@@ -7,38 +7,26 @@ let rl = readline.createInterface({
   terminal: false
 });
 
-const server = new SpigotServer('test', 'Test', '/home/crashoz/TestNetwork', 'spigot-1.12.2.jar', '/home/crashoz/TestBackups', '/home/crashoz/Templates/template.xz', 25565);
-
-server.on('stdout', (line) => {
-  console.log(line);
-})
+const serverNetwork = new ServerNetwork('testnet', 'TestNetwork', '/home/crashoz');
 
 rl.on('line', function(line){
   switch(line) {
-    case 'init':
-    server.init().then(() => {
-      console.log('[server initialized]');
-    });
+    case 'add':
+    serverNetwork.addServer('test', 'Test', 'template', 'spigot-1.12.2.jar').then(() => {
+      console.log('[server added]');
+    })
     break;
     case 'start':
-    server.start().then(() => {
-      console.log('[server started]');
-    });
+    serverNetwork.startServer('test');
     break;
     case 'stop':
-    server.stop().then(() => {
-      console.log('[server stopped]');
-    });
+    serverNetwork.stopServer('test');
     break;
-    case 'restart':
-    server.restart().then(() => {
-      console.log('[server restarted]');
-    });
+    case 'del':
+    serverNetwork.removeServer('test');
     break;
-    case 'backup':
-    server.backup().then(() => {
-      console.log('[server backup complete]');
-    });
+    case 'load':
+    serverNetwork.loadConfig();
     break;
   }
 })

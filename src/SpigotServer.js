@@ -24,7 +24,7 @@ class SpigotServer extends EventEmitter {
    * @param  {String} backupDir Directory in which backups will be placed (in slug subdir)
    * @param  {Integer} port      Port to bind the server to
    */
-  constructor(slug, name, baseDir, jarFile, backupDir, template, port) {
+  constructor(slug, name, baseDir, jarFile, backupDir, template, port, isBungee) {
     super();
     this.slug = slug;
     this.name = name;
@@ -34,6 +34,7 @@ class SpigotServer extends EventEmitter {
     this.backupDir = backupDir;
     this.template = template;
     this.port = port;
+    this.isBungee = isBungee;
 
     this.mysql = {
       user: slug,
@@ -155,7 +156,11 @@ class SpigotServer extends EventEmitter {
         this.emit('stdout', line.toString());
       });
 
-      let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"/;
+      let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"$/;
+      if (this.isBungee) {
+        doneRegex = /^[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+$/;
+      }
+
       let filter = (line) => {
         line = line.toString();
         let m = doneRegex.exec(line);
@@ -185,7 +190,11 @@ class SpigotServer extends EventEmitter {
       this.process.on('exit', (code) => {
         resolve();
       });
-      this.executeCommand('stop');
+      if (this.isBungee) {
+        this.executeCommand('stop');
+      } else {
+        this.executeCommand('end');
+      }
     });
   }
 
