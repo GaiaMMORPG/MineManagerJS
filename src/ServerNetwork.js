@@ -35,7 +35,7 @@ class ServerNetwork {
         'port': 25565,
         'active': true,
         'ready': false
-      }
+      },
       'spigot-servers': {}
     }).write();
 
@@ -44,26 +44,40 @@ class ServerNetwork {
   }
 
   loadBungee() {
-    let config = this.db.get('bungeecord').value();
-    let templatePath = this.templateDir + '/' + config.template + '.tar.xz';
-    this.bungeeCord = new SpigotServer('bungeecord', config.name, this.baseDir, config.jarfile, this.backupDir, templatePath, config.port, true);
-    if (!config.ready) {
-      this.bungeeCord.init().then(() => {
-        return this.bungeeCord.start();
-      });
-      this.db.set('bungeecord.ready', 'true').write();
-    }
+    return new Promise((resolve, reject) => {
+      let config = this.db.get('bungeecord').value();
+      let templatePath = this.templateDir + '/' + config.template + '.tar.xz';
+      this.bungeeCord = new SpigotServer('bungeecord', config.name, this.workingDir, config.jarfile, this.backupDir, templatePath, config.port, true);
+      if (!config.ready) {
+        this.bungeeCord.init().then(() => {
+          return this.bungeeCord.start();
+        }).then(() => {
+          resolve();
+        });
+        this.db.set('bungeecord.ready', true).write();
+      } else {
+        this.bungeeCord.start().then(() => {
+          resolve();
+        });
+      }
+    })
   }
 
   loadServers() {
-    this.db.get('spigot-servers')
-      .map((config, slug) => {
-        this.loadServer(slug, config.name, config.template, config.jarfile, config.port);
-        if (config.active) {
-          this.startServer(slug);
-        }
+    return new Promise((resolve, reject) => {
+      let startPromises = [];
+      this.db.get('spigot-servers')
+        .map((config, slug) => {
+          this.loadServer(slug, config.name, config.template, config.jarfile, config.port);
+          if (config.active) {
+            startPromises.push(this.startServer(slug));
+          }
+        })
+        .value();
+      Promise.all(startPromises).then(() => {
+        resolve();
       })
-      .value();
+    });
   }
 
   getOpenPort() {
@@ -82,14 +96,14 @@ class ServerNetwork {
     let port = this.getOpenPort();
     this.usedPorts.push(port);
 
-    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port);
+    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, false);
     return this.spigotServers[slug].init().then(() => {
       this.db.get('spigot-servers')
         .set(slug, {
           name: name,
           jarfile: jarFile,
           template: template,
-          port: port
+          port: port,
           active: false
         })
         .write();
@@ -113,7 +127,7 @@ class ServerNetwork {
     if (this.usedPorts.indexOf(port) !== -1) {
       return Promise.reject('port-used');
     }
-    this.spigotServers[slug] = new SpigotServer(slug, name, this.baseDir, jarFile, this.backupDir, templatePath, port);
+    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, false);
     return Promise.resolve();
   }
 

@@ -1,5 +1,6 @@
 const readline = require('readline');
 const ServerNetwork = require('./ServerNetwork')
+const WebAPI = require('./WebAPI');
 
 let rl = readline.createInterface({
   input: process.stdin,
@@ -26,7 +27,16 @@ rl.on('line', function(line){
     serverNetwork.removeServer('test');
     break;
     case 'load':
-    serverNetwork.loadConfig();
+    serverNetwork.loadBungee().then(() => {
+      console.log('[bungee loaded]');
+      return serverNetwork.loadServers();
+    }).then(() => {
+      console.log('[everything loaded]');
+    });
+
     break;
   }
 })
+
+const webAPI = new WebAPI(serverNetwork);
+webAPI.start();

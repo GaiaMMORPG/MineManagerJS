@@ -47,6 +47,7 @@ class SpigotServer extends EventEmitter {
     this.stdoutSplitter = null;
     this.sqlBackupProcess = null;
     this.backupProcess = null;
+    this.monitorProcess = null;
   }
 
   /**
@@ -153,12 +154,13 @@ class SpigotServer extends EventEmitter {
 
       this.stdoutSplitter = this.process.stdout.pipe(StreamSplitter('\n'));
       this.stdoutSplitter.on('token', (line) => {
+        console.log(line.toString());
         this.emit('stdout', line.toString());
       });
 
       let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"$/;
       if (this.isBungee) {
-        doneRegex = /^[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+$/;
+        doneRegex = /[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+/;
       }
 
       let filter = (line) => {
@@ -166,10 +168,61 @@ class SpigotServer extends EventEmitter {
         let m = doneRegex.exec(line);
         if (m) {
           this.stdoutSplitter.removeListener('token', filter);
+          this.startMonitoring();
           resolve();
         }
       }
       this.stdoutSplitter.on('token', filter);
+    });
+  }
+
+  /**
+   * Launch PIDSTAT  to monitor CPU, RAM and disk I/O
+   * @return {}
+   */
+  startMonitoring() {
+    if (!this.isRunning) {
+      winston.warn(`Tried to monitor SpigotServer "${this.name}"(${this.slug}) but it is not running`);
+      reject('not-running');
+      return;
+    }
+
+    this.monitorProcess = spawn("pidstat", [
+            "-h",
+            "-r",
+            "-u",
+            "-d",
+            "-s",
+            "1",
+            "-p",
+            this.process.pid
+            ]);
+
+    this.monitorProcess.on('exit', (code) => {
+      this.monitorProcess = null;
+    })
+
+    let stdoutSplitter = this.monitorProcess.stdout.pipe(StreamSplitter('\n'));
+    stdoutSplitter.on("token", function(line) {
+        line = line.toString();
+        if (line[0] == '#') {
+            return;
+        }
+        var raw = line.split(/\s+/);
+        if (raw.length != 21) {
+            return;
+        }
+        raw.shift();
+        raw.shift();
+        raw.shift();
+        raw.shift();
+        raw.pop();
+
+        var obj = {
+            'all': raw
+        };
+
+        this.emit('pidstat', obj);
     });
   }
 
@@ -187,15 +240,27 @@ class SpigotServer extends EventEmitter {
 
       winston.info(`Stopping SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
 
+      if (this.monitorProcess != null) {
+        this.stopMonitoring();
+      }
+
       this.process.on('exit', (code) => {
         resolve();
       });
       if (this.isBungee) {
-        this.executeCommand('stop');
-      } else {
         this.executeCommand('end');
+      } else {
+        this.executeCommand('stop');
       }
     });
+  }
+
+  /**
+   * Stop PIDSTAT
+   * @return {}
+   */
+  stopMonitoring() {
+    this.monitorProcess.kill('SIGTERM');
   }
 
   /**
@@ -273,6 +338,15 @@ class SpigotServer extends EventEmitter {
         }
       });
     });
+  }
+
+
+
+  status() {
+    return {
+      name: this.name,
+      isRunning: this.isRunning
+    }
   }
 }
 

@@ -2,6 +2,8 @@
 
 A Node.js wrapper for Spigot and BungeeCord servers. Exposes an API for remote control and deployment of servers.
 
+Requires command 'pidstat' from package 'sysstat'.
+
 ```
 Copyright 2017 Xavier 'crashoz' Launey
 
