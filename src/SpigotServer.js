@@ -11,6 +11,8 @@ const EventEmitter = require('events');
 const mysql = require('mysql');
 const fs = require('fs-extra');
 
+const ServerProperties = require('./ServerProperties');
+
 /**
  * This is the main Server class for instanciating new Spigot Servers
  */
@@ -35,6 +37,10 @@ class SpigotServer extends EventEmitter {
     this.template = template;
     this.port = port;
     this.isBungee = isBungee;
+
+    if (!this.isBungee) {
+      this.serverProperties = new ServerProperties(this.workingDir + '/server.properties');
+    }
 
     this.mysql = {
       user: slug,
@@ -108,10 +114,30 @@ class SpigotServer extends EventEmitter {
           } else {
             winston.info(`Template cloned for SpigotServer "${this.name}"(${this.slug})`);
 
-            resolve();
+
           }
         });
       });
+    });
+  }
+
+/**
+ * Sets the port the server will be listenning on
+ */
+  setPort() {
+    return new Promise((resolve, reject) => {
+      if (this.isBungee) {
+        resolve()
+      } else {
+        this.serverProperties.loadProperties().then(() => {
+          this.serverProperties.update('server-port', this.port);
+          return this.serverProperties.saveProperties();
+        }).then(() => {
+          resolve();
+        }).catch((err) => {
+          reject(err);
+        });
+      }
     });
   }
 
@@ -127,52 +153,54 @@ class SpigotServer extends EventEmitter {
         return;
       }
 
-      winston.info(`Starting SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
+      this.setPort().then(() => {
+        winston.info(`Starting SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
 
-      this.isRunning = true;
-      this.process = spawn('java', [
-        '-jar',
-        this.jarFile,
-        'nogui'
-      ], {
-        cwd: this.workingDir
-      });
+        this.isRunning = true;
+        this.process = spawn('java', [
+          '-jar',
+          this.jarFile,
+          'nogui'
+        ], {
+          cwd: this.workingDir
+        });
 
-      this.process.on('error', (err) => {
-        winston.error(`SpigotServer "${this.name}"(${this.slug}) error in process ${this.pid}: ${err}`);
-      });
+        this.process.on('error', (err) => {
+          winston.error(`SpigotServer "${this.name}"(${this.slug}) error in process ${this.pid}: ${err}`);
+        });
 
-      this.process.on('exit', (code) => {
-        if (code === 0) {
-          this.isRunning = false;
-          this.process = null;
-          winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped successfully`);
-        } else {
-          winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped with error code ${code}`);
+        this.process.on('exit', (code) => {
+          if (code === 0) {
+            this.isRunning = false;
+            this.process = null;
+            winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped successfully`);
+          } else {
+            winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped with error code ${code}`);
+          }
+        });
+
+        this.stdoutSplitter = this.process.stdout.pipe(StreamSplitter('\n'));
+        this.stdoutSplitter.on('token', (line) => {
+          console.log(line.toString());
+          this.emit('stdout', line.toString());
+        });
+
+        let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"$/;
+        if (this.isBungee) {
+          doneRegex = /[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+/;
         }
-      });
 
-      this.stdoutSplitter = this.process.stdout.pipe(StreamSplitter('\n'));
-      this.stdoutSplitter.on('token', (line) => {
-        console.log(line.toString());
-        this.emit('stdout', line.toString());
-      });
-
-      let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"$/;
-      if (this.isBungee) {
-        doneRegex = /[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+/;
-      }
-
-      let filter = (line) => {
-        line = line.toString();
-        let m = doneRegex.exec(line);
-        if (m) {
-          this.stdoutSplitter.removeListener('token', filter);
-          this.startMonitoring();
-          resolve();
+        let filter = (line) => {
+          line = line.toString();
+          let m = doneRegex.exec(line);
+          if (m) {
+            this.stdoutSplitter.removeListener('token', filter);
+            this.startMonitoring();
+            resolve();
+          }
         }
-      }
-      this.stdoutSplitter.on('token', filter);
+        this.stdoutSplitter.on('token', filter);
+      });
     });
   }
 
