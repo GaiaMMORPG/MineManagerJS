@@ -26,6 +26,9 @@ rl.on('line', function(line){
     case 'del':
     serverNetwork.removeServer('test');
     break;
+    case 'bkp':
+    serverNetwork.backupServer('test');
+    break;
     case 'load':
     serverNetwork.loadBungee().then(() => {
       console.log('[bungee loaded]');

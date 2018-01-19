@@ -14,15 +14,27 @@ class WebAPI {
   handleConnection(ws) {
     ws.on('message', (value) => {
       let data = JSON.parse(value);
+      console.log(data);
       switch (data.type) {
-        case 'bungeestatus':
-        ws.send(JSON.stringify({
-          type: 'bungeestatus',
-          value: this.serverNetwork.bungeeCord.status()
-        }));
-        break;
+        case 'REQUEST_SERVERS_LIST':
+          ws.send(JSON.stringify({
+            type: 'SERVERS_LIST',
+            value: this.serverNetwork.serversList()
+          }));
+          break;
+        case 'SUBSCRIBE_SERVERS_DETAIL':
+          this.serverNetwork.subscribe(ws, 'SERVERS_DETAIL');
+          break;
+        case 'UNSUBSCRIBE_SERVERS_DETAIL':
+          this.serverNetwork.unsubscribe(ws, 'SERVERS_DETAIL');
+          break;
       }
     });
+
+    ws.on('error', (err) => {
+      console.log(err);
+      ws.close()
+    })
   }
 
   stop() {

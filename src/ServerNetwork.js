@@ -11,7 +11,7 @@ class ServerNetwork {
     this.name = name;
     this.baseDir = baseDir;
     this.workingDir = baseDir + '/' + slug;
-    this.backupDir = baseDir + '/ ' + slug + '-backups';
+    this.backupDir = baseDir + '/' + slug + '-backups';
     this.templateDir = baseDir + '/' + slug + '-templates';
     this.configFile = this.workingDir + '/config.json';
 
@@ -41,13 +41,15 @@ class ServerNetwork {
 
     this.bungeeCord = null;
     this.spigotServers = {};
+
+    this.subscriptions = {};
   }
 
   loadBungee() {
     return new Promise((resolve, reject) => {
       let config = this.db.get('bungeecord').value();
       let templatePath = this.templateDir + '/' + config.template + '.tar.xz';
-      this.bungeeCord = new SpigotServer('bungeecord', config.name, this.workingDir, config.jarfile, this.backupDir, templatePath, config.port, true);
+      this.bungeeCord = new SpigotServer('bungeecord', config.name, this.workingDir, config.jarfile, this.backupDir, templatePath, config.port, config.active, true);
       if (!config.ready) {
         this.bungeeCord.init().then(() => {
           return this.bungeeCord.start();
@@ -68,7 +70,7 @@ class ServerNetwork {
       let startPromises = [];
       this.db.get('spigot-servers')
         .map((config, slug) => {
-          this.loadServer(slug, config.name, config.template, config.jarfile, config.port);
+          this.loadServer(slug, config.name, config.template, config.jarfile, config.port, config.active);
           if (config.active) {
             startPromises.push(this.startServer(slug));
           }
@@ -96,7 +98,7 @@ class ServerNetwork {
     let port = this.getOpenPort();
     this.usedPorts.push(port);
 
-    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, false);
+    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, false, false);
     return this.spigotServers[slug].init().then(() => {
       this.db.get('spigot-servers')
         .set(slug, {
@@ -121,13 +123,13 @@ class ServerNetwork {
     })
   }
 
-  loadServer(slug, name, template, jarFile, port) {
+  loadServer(slug, name, template, jarFile, port, isActive) {
     let templatePath = this.templateDir + '/' + template + '.tar.xz';
 
     if (this.usedPorts.indexOf(port) !== -1) {
       return Promise.reject('port-used');
     }
-    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, false);
+    this.spigotServers[slug] = new SpigotServer(slug, name, this.workingDir, jarFile, this.backupDir, templatePath, port, isActive, false);
     return Promise.resolve();
   }
 
@@ -157,6 +159,88 @@ class ServerNetwork {
 
   backupServer(slug) {
     return this.spigotServers[slug].backup();
+  }
+
+  serversList() {
+    return {
+      bungeecord: this.bungeeCord.slug,
+      servers: Object.keys(this.spigotServers)
+    }
+  }
+
+  serverDetail(slug) {
+    let server = this.spigotServers[slug];
+    let lastBackup = server.backups[server.backups.length - 1];
+    let date = 'never';
+    let size = 0;
+    if (lastBackup) {
+      date = lastBackup.date.format('YYYY-MM-DD-HH-mm-ss')
+      size = lastBackup.size;
+    }
+    return {
+      type: 'SERVER_BASE_DETAIL',
+      value: {
+        slug: slug,
+        name: server.name,
+        isActive: server.isActive,
+        running: server.status,
+        monitoring: server.monitorHistory[server.monitorHistory.length - 1],
+        lastBackup: {
+          date: date,
+          size: size
+        }
+      }
+    }
+  }
+
+  bungeeDetail() {
+    let lastBackup = this.bungeeCord.backups[this.bungeeCord.backups.length - 1];
+    let date = 'never';
+    let size = 0;
+    if (lastBackup) {
+      date = lastBackup.date.format('YYYY-MM-DD-HH-mm-ss')
+      size = lastBackup.size;
+    }
+    return {
+      type: 'SERVER_BASE_DETAIL',
+      value: {
+        slug: this.bungeeCord.slug,
+        name: this.bungeeCord.name,
+        isActive: this.bungeeCord.isActive,
+        running: this.bungeeCord.status,
+        monitoring: this.bungeeCord.monitorHistory[this.bungeeCord.monitorHistory.length - 1],
+        lastBackup: {
+          date: date,
+          size: size
+        }
+      }
+    }
+  }
+
+  subscribe(client, channel) {
+    switch (channel) {
+      case 'SERVERS_DETAIL':
+        client.send(JSON.stringify(this.bungeeDetail()), (err) => {});
+        this.bungeeCord.subscribe(client, 'SERVER_DETAIL');
+
+        Object.keys(this.spigotServers).forEach((slug) => {
+          let server = this.spigotServers[slug];
+          client.send(JSON.stringify(this.serverDetail(slug)), (err) => {});
+          server.subscribe(client, 'SERVER_DETAIL');
+        })
+        break;
+    }
+  }
+
+  unsubscribe(client, channel) {
+    switch (channel) {
+      case 'SERVERS_DETAIL':
+        this.bungeeCord.unsubscribe(client, 'SERVER_DETAIL');
+        Object.keys(this.spigotServers).forEach((slug) => {
+          server.unsubscribe(client, 'SERVER_DETAIL');
+        })
+        break;
+    }
   }
 }
 

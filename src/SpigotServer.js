@@ -26,16 +26,17 @@ class SpigotServer extends EventEmitter {
    * @param  {String} backupDir Directory in which backups will be placed (in slug subdir)
    * @param  {Integer} port      Port to bind the server to
    */
-  constructor(slug, name, baseDir, jarFile, backupDir, template, port, isBungee) {
+  constructor(slug, name, baseDir, jarFile, backupDir, template, port, isActive, isBungee) {
     super();
     this.slug = slug;
     this.name = name;
     this.baseDir = baseDir;
     this.workingDir = baseDir + '/' + slug;
     this.jarFile = jarFile;
-    this.backupDir = backupDir;
+    this.backupDir = backupDir + '/' + slug;
     this.template = template;
     this.port = port;
+    this.isActive = isActive;
     this.isBungee = isBungee;
 
     if (!this.isBungee) {
@@ -48,12 +49,23 @@ class SpigotServer extends EventEmitter {
       db: slug,
     }
 
+    this.monitorHistory = [];
+
     this.isRunning = false;
+    this.status = 'STOPPED';
     this.process = null;
     this.stdoutSplitter = null;
     this.sqlBackupProcess = null;
     this.backupProcess = null;
     this.monitorProcess = null;
+
+    this.backups = [];
+    this.loadBackups();
+
+    this.isActiveSubscribers = [];
+    this.isRunningSubscribers = [];
+    this.monitorSubscribers = [];
+    this.backupsSubscribers = [];
   }
 
   /**
@@ -68,10 +80,10 @@ class SpigotServer extends EventEmitter {
       let connection = mysql.createConnection(config.mysql);
       winston.info(`Creating MYSQL Database for "${this.name}"(${this.slug})`);
       Promise.resolve().then(() => {
-        connection.connect((err) => {
+        connection.connect((error) => {
           return new Promise((resolve, reject) => {
-            if (err) {
-              console.log(err);
+            if (error) {
+              winston.error(`Error connecting to MYSQL: ${error}`);
               reject();
             } else {
               resolve();
@@ -82,7 +94,7 @@ class SpigotServer extends EventEmitter {
         return new Promise((resolve, reject) => {
           connection.query(`CREATE DATABASE ${this.mysql.db}`, (error, results, fields) => {
             if (error) {
-              console.log(error);
+              winston.error(`Error creating database ${this.mysql.db} in MYSQL: ${error}`);
               reject();
             } else {
               resolve(results, fields)
@@ -93,7 +105,7 @@ class SpigotServer extends EventEmitter {
         return new Promise((resolve, reject) => {
           connection.query(`GRANT ALL PRIVILEGES ON ${this.mysql.db} . * TO '${this.mysql.user}'@'localhost' IDENTIFIED BY '${this.mysql.password}'`, (error, results, fields) => {
             if (error) {
-              console.log(error);
+              winston.error(`Error creating user ${this.mysql.user} in MYSQL: ${error}`);
               reject();
             } else {
               resolve(results, fields)
@@ -106,17 +118,22 @@ class SpigotServer extends EventEmitter {
 
       // Copy folder structure (template)
       fs.ensureDir(`${this.workingDir}`).then(() => {
-        exec(`tar -xJf ${this.template} -C ${this.workingDir} --strip 1`, (error, stdout, stderr) => {
-          if (error != null) {
-            winston.error(`Error while cloning template for SpigotServer "${this.name}"(${this.slug}): ${stderr}`);
-            reject('template-error');
-            return;
-          } else {
-            winston.info(`Template cloned for SpigotServer "${this.name}"(${this.slug})`);
-
-
-          }
+        return new Promise((resolve, reject) => {
+          exec(`tar -xJf ${this.template} -C ${this.workingDir} --strip 1`, (error, stdout, stderr) => {
+            if (error != null) {
+              winston.error(`Error while cloning template for SpigotServer "${this.name}"(${this.slug}): ${stderr}`);
+              reject('template-error');
+              return;
+            } else {
+              winston.info(`Template cloned for SpigotServer "${this.name}"(${this.slug})`);
+              resolve();
+            }
+          });
         });
+      }).then(() => {
+        fs.ensureDir(`${this.backupDir}`).then(() => {
+          resolve();
+        })
       });
     });
   }
@@ -157,6 +174,7 @@ class SpigotServer extends EventEmitter {
         winston.info(`Starting SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
 
         this.isRunning = true;
+        this.setRunning('STARTING');
         this.process = spawn('java', [
           '-jar',
           this.jarFile,
@@ -170,6 +188,7 @@ class SpigotServer extends EventEmitter {
         });
 
         this.process.on('exit', (code) => {
+          this.setRunning('STOPPED');
           if (code === 0) {
             this.isRunning = false;
             this.process = null;
@@ -185,7 +204,7 @@ class SpigotServer extends EventEmitter {
           this.emit('stdout', line.toString());
         });
 
-        let doneRegex = /^\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"$/;
+        let doneRegex = /\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"/;
         if (this.isBungee) {
           doneRegex = /[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+/;
         }
@@ -194,6 +213,7 @@ class SpigotServer extends EventEmitter {
           line = line.toString();
           let m = doneRegex.exec(line);
           if (m) {
+            this.setRunning('STARTED');
             this.stdoutSplitter.removeListener('token', filter);
             this.startMonitoring();
             resolve();
@@ -231,7 +251,7 @@ class SpigotServer extends EventEmitter {
     })
 
     let stdoutSplitter = this.monitorProcess.stdout.pipe(StreamSplitter('\n'));
-    stdoutSplitter.on("token", function(line) {
+    stdoutSplitter.on("token", (line) => {
         line = line.toString();
         if (line[0] == '#') {
             return;
@@ -246,11 +266,25 @@ class SpigotServer extends EventEmitter {
         raw.shift();
         raw.pop();
 
-        var obj = {
-            'all': raw
-        };
+        if (this.monitorHistory.length > 100) {
+          this.monitorHistory.shift();
+        }
+        this.monitorHistory.push(raw);
 
-        this.emit('pidstat', obj);
+        this.monitorSubscribers.forEach((client) => {
+          client.send(JSON.stringify({
+            type: 'SERVER_MONITORING',
+            value: {
+              slug: this.slug,
+              monitoring: raw
+            }
+          }), (err) => {
+            if (!err) {
+              return;
+            }
+            remove(this.monitorSubscribers, client);
+          })
+        });
     });
   }
 
@@ -267,6 +301,8 @@ class SpigotServer extends EventEmitter {
       }
 
       winston.info(`Stopping SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
+
+      this.setRunning('STOPPING');
 
       if (this.monitorProcess != null) {
         this.stopMonitoring();
@@ -352,7 +388,7 @@ class SpigotServer extends EventEmitter {
           winston.info(`Performed MYSQL backup on SpigotServer "${this.name}"(${this.slug})`);
 
           let date = moment().format('YYYY-MM-DD-HH-mm-ss');
-          exec(`tar -cJf ${this.backupDir}/${this.slug}/${date}.tar.xz ${this.workingDir}`, (error, stdout, stderr) => {
+          exec(`tar -cJf ${this.backupDir}/${date}.tar.xz ${this.workingDir}`, (error, stdout, stderr) => {
             if (error != null) {
               winston.error(`Error while performing minecraft backup on SpigotServer "${this.name}"(${this.slug}): ${stderr}`);
               reject('minecraft-backup-error');
@@ -360,7 +396,31 @@ class SpigotServer extends EventEmitter {
             } else {
               winston.info(`Performed minecraft backup on SpigotServer "${this.name}"(${this.slug})`);
 
-              resolve();
+              fs.stat(`${this.backupDir}/${date}.tar.xz`, (err, stat) => {
+                let size = stat.blocks*stat.blksize/8;
+                this.backups.push({
+                  date: moment(date, 'YYYY-MM-DD-HH-mm-ss'),
+                  size: size
+                });
+
+                this.backupsSubscribers.forEach((client) => {
+                  client.send(JSON.stringify({
+                    type: 'SERVER_BACKUP',
+                    value: {
+                      slug: this.slug,
+                      date: date,
+                      size: size
+                    }
+                  }), (err) => {
+                    if (!err) {
+                      return;
+                    }
+                    remove(this.backupsSubscribers, client);
+                  })
+                });
+
+                resolve();
+              })
             }
           });
         }
@@ -368,13 +428,104 @@ class SpigotServer extends EventEmitter {
     });
   }
 
+  loadBackups() {
+    fs.readdir(`${this.backupDir}`, (err, files) => {
+      if (err) {
+        return;
+      } else {
+        let promises = [];
+        files.forEach((file) => {
+          let promise = new Promise((resolve, reject) => {
+            let date = moment(file.split('.')[0], 'YYYY-MM-DD-HH-mm-ss');
+            fs.stat(`${this.backupDir}/${file}`, (err, stat) => {
+              if (err) {
+                reject();
+              } else {
+                let size = stat.blocks*stat.blksize/8;
+                resolve({
+                  date: date,
+                  size: size
+                });
+              }
+            });
+          });
+          promises.push(promise);
+        });
 
+        Promise.all(promises).then((backups) => {
+          this.backups = backups;
+          this.backups.sort(function(left, right) {
+            return left.date.diff(right.date);
+          });
+          console.log(this.backups);
+        })
+      }
+    });
+  }
 
-  status() {
-    return {
-      name: this.name,
-      isRunning: this.isRunning
+  setActive(isActive) {
+    this.isActive = isActive;
+    this.isActiveSubscribers.forEach((client) => {
+      client.send(JSON.stringify({
+        type: 'SERVER_ACTIVE',
+        value: {
+          slug: this.slug,
+          isActive: this.isActive
+        }
+      }), (err) => {
+        if (!err) {
+          return;
+        }
+        remove(this.isActiveSubscribers, client);
+      })
+    });
+  }
+
+  setRunning(status) {
+    this.status = status;
+    this.isRunningSubscribers.forEach((client) => {
+      client.send(JSON.stringify({
+        type: 'SERVER_RUNNING',
+        value: {
+          slug: this.slug,
+          running: status
+        }
+      }), (err) => {
+        if (!err) {
+          return;
+        }
+        remove(this.isRunningSubscribers, client);
+      })
+    });
+  }
+
+  subscribe(client, channel) {
+    switch(channel) {
+      case 'SERVER_DETAIL':
+        this.isActiveSubscribers.push(client);
+        this.isRunningSubscribers.push(client);
+        this.monitorSubscribers.push(client);
+        this.backupsSubscribers.push(client);
+        break;
     }
+  }
+
+  unsubscribe(client, channel) {
+    switch(channel) {
+      case 'SERVER_DETAIL':
+        remove(this.isActiveSubscribers, client);
+        remove(this.isRunningSubscribers, client);
+        remove(this.monitorSubscribers, client);
+        remove(this.backupsSubscribers, client);
+        break;
+    }
+  }
+}
+
+function remove(array, elt) {
+  let i = array.indexOf(elt);
+  if (i != -1) {
+    array.splice(i, 1);
   }
 }
 
