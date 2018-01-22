@@ -62,10 +62,16 @@ class SpigotServer extends EventEmitter {
     this.backups = [];
     this.loadBackups();
 
+    this.players = {};
+
+    this.console = [];
+
     this.isActiveSubscribers = [];
     this.isRunningSubscribers = [];
     this.monitorSubscribers = [];
     this.backupsSubscribers = [];
+    this.playersSubscribers = [];
+    this.consoleSubscribers = [];
   }
 
   /**
@@ -173,6 +179,10 @@ class SpigotServer extends EventEmitter {
       this.setPort().then(() => {
         winston.info(`Starting SpigotServer "${this.name}"(${this.slug}) on port ${this.port}`);
 
+        this.players = {};
+        this.console = [];
+        this.monitorHistory = [];
+
         this.isRunning = true;
         this.setRunning('STARTING');
         this.process = spawn('java', [
@@ -200,28 +210,118 @@ class SpigotServer extends EventEmitter {
 
         this.stdoutSplitter = this.process.stdout.pipe(StreamSplitter('\n'));
         this.stdoutSplitter.on('token', (line) => {
-          console.log(line.toString());
-          this.emit('stdout', line.toString());
+          const ls = line.toString();
+          this.console.push(ls);
+
+          this.consoleSubscribers.forEach((client) => {
+            client.send(JSON.stringify({
+              type: 'SERVER_CONSOLE_LINE',
+              value: {
+                slug: this.slug,
+                line: ls,
+              }
+            }), (err) => {
+              if (!err) {
+                return;
+              }
+              remove(this.consoleSubscribers, client);
+            })
+          });
+
+          this.emit('stdout', ls);
         });
+
+        /**
+         * STARTED FILTER
+         */
 
         let doneRegex = /\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: Done \([0-9]+\.[0-9]+s\)! For help, type "help" or "?"/;
         if (this.isBungee) {
           doneRegex = /[0-9]{2}:[0-9]{2}:[0-9]{2} \[INFO\] Listening on \/[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}.[0-9]{1,3}:[0-9]+/;
         }
 
-        let filter = (line) => {
+        let startedFilter = (line) => {
           line = line.toString();
           let m = doneRegex.exec(line);
           if (m) {
             this.setRunning('STARTED');
-            this.stdoutSplitter.removeListener('token', filter);
+            this.stdoutSplitter.removeListener('token', startedFilter);
             this.startMonitoring();
             resolve();
           }
         }
-        this.stdoutSplitter.on('token', filter);
+        this.stdoutSplitter.on('token', startedFilter);
+
+        /**
+         * LOGIN/LOGOUT FILTER
+         */
+
+        let playerLogin = /\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: ([a-zA-Z0-9_\-])+\[\/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):[0-9]+\] logged in/
+        let playerLogout = /\[[0-9]{2}:[0-9]{2}:[0-9]{2} INFO\]: ([a-zA-Z0-9_\-])+ lost connection/
+
+        let loginlogoutFilter = (line) => {
+          line = line.toString();
+          let m = playerLogin.exec(line);
+          if (m) {
+            this.playerLogin(m[1], m[2]);
+          }
+          m = playerLogout.exec(line);
+          if (m) {
+            this.playerLogout(m[1]);
+          }
+        }
+        this.stdoutSplitter.on('token', loginlogoutFilter);
       });
     });
+  }
+
+  /**
+   * A player logs in to the server
+   * @param  {String} name username
+   * @param  {String} ip   userip
+   * @return {}
+   */
+  playerLogin(name, ip) {
+    this.players[name] = ip;
+    this.playersSubscribers.forEach((client) => {
+      client.send(JSON.stringify({
+        type: 'SERVER_PLAYER_LOGIN',
+        value: {
+          slug: this.slug,
+          name: name,
+          ip: ip
+        }
+      }), (err) => {
+        if (!err) {
+          return;
+        }
+        remove(this.playersSubscribers, client);
+      })
+    });
+  }
+
+  /**
+   * A player logs out of the server
+   * @param  {String} name username
+   * @return {}
+   */
+  playerLogout(name) {
+    this.playersSubscribers.forEach((client) => {
+      client.send(JSON.stringify({
+        type: 'SERVER_PLAYER_LOGOUT',
+        value: {
+          slug: this.slug,
+          name: name,
+          ip: this.players[name]
+        }
+      }), (err) => {
+        if (!err) {
+          return;
+        }
+        remove(this.playersSubscribers, client);
+      })
+    });
+    delete this.players[name];
   }
 
   /**
@@ -241,7 +341,7 @@ class SpigotServer extends EventEmitter {
             "-u",
             "-d",
             "-s",
-            "1",
+            "5",
             "-p",
             this.process.pid
             ]);
@@ -499,6 +599,21 @@ class SpigotServer extends EventEmitter {
     });
   }
 
+  sendConsole(client) {
+    client.send(JSON.stringify({
+      type: 'SERVER_CONSOLE',
+      value: {
+        slug: this.slug,
+        console: this.console,
+        length: 500
+      }
+    }), (err) => {
+      if (!err) {
+        return;
+      }
+    })
+  }
+
   subscribe(client, channel) {
     switch(channel) {
       case 'SERVER_DETAIL':
@@ -506,6 +621,11 @@ class SpigotServer extends EventEmitter {
         this.isRunningSubscribers.push(client);
         this.monitorSubscribers.push(client);
         this.backupsSubscribers.push(client);
+        this.playersSubscribers.push(client);
+        break;
+      case 'SERVER_CONSOLE':
+        this.sendConsole(client);
+        this.consoleSubscribers.push(client);
         break;
     }
   }
@@ -517,6 +637,10 @@ class SpigotServer extends EventEmitter {
         remove(this.isRunningSubscribers, client);
         remove(this.monitorSubscribers, client);
         remove(this.backupsSubscribers, client);
+        remove(this.playersSubscribers, client);
+        break;
+      case 'SERVER_CONSOLE':
+        remove(this.consoleSubscribers, client);
         break;
     }
   }

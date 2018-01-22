@@ -39,7 +39,6 @@ class ServerNetwork {
       'spigot-servers': {}
     }).write();
 
-    this.bungeeCord = null;
     this.spigotServers = {};
 
     this.subscriptions = {};
@@ -49,16 +48,16 @@ class ServerNetwork {
     return new Promise((resolve, reject) => {
       let config = this.db.get('bungeecord').value();
       let templatePath = this.templateDir + '/' + config.template + '.tar.xz';
-      this.bungeeCord = new SpigotServer('bungeecord', config.name, this.workingDir, config.jarfile, this.backupDir, templatePath, config.port, config.active, true);
+      this.spigotServers['bungeecord'] = new SpigotServer('bungeecord', config.name, this.workingDir, config.jarfile, this.backupDir, templatePath, config.port, config.active, true);
       if (!config.ready) {
-        this.bungeeCord.init().then(() => {
-          return this.bungeeCord.start();
+        this.spigotServers['bungeecord'].init().then(() => {
+          return this.spigotServers['bungeecord'].start();
         }).then(() => {
           resolve();
         });
         this.db.set('bungeecord.ready', true).write();
       } else {
-        this.bungeeCord.start().then(() => {
+        this.spigotServers['bungeecord'].start().then(() => {
           resolve();
         });
       }
@@ -163,13 +162,11 @@ class ServerNetwork {
 
   serversList() {
     return {
-      bungeecord: this.bungeeCord.slug,
       servers: Object.keys(this.spigotServers)
     }
   }
 
-  serverDetail(slug) {
-    let server = this.spigotServers[slug];
+  detail(server) {
     let lastBackup = server.backups[server.backups.length - 1];
     let date = 'never';
     let size = 0;
@@ -177,51 +174,36 @@ class ServerNetwork {
       date = lastBackup.date.format('YYYY-MM-DD-HH-mm-ss')
       size = lastBackup.size;
     }
+    let monitoring = server.monitorHistory[server.monitorHistory.length - 1];
+    if (server.status == 'STOPPED') {
+      monitoring = undefined;
+    }
+    let players = Object.keys(server.players).length;
     return {
       type: 'SERVER_BASE_DETAIL',
       value: {
-        slug: slug,
+        slug: server.slug,
         name: server.name,
         isActive: server.isActive,
         running: server.status,
-        monitoring: server.monitorHistory[server.monitorHistory.length - 1],
+        monitoring: monitoring,
         lastBackup: {
           date: date,
           size: size
-        }
+        },
+        players: players
       }
     }
   }
 
-  bungeeDetail() {
-    let lastBackup = this.bungeeCord.backups[this.bungeeCord.backups.length - 1];
-    let date = 'never';
-    let size = 0;
-    if (lastBackup) {
-      date = lastBackup.date.format('YYYY-MM-DD-HH-mm-ss')
-      size = lastBackup.size;
-    }
-    return {
-      type: 'SERVER_BASE_DETAIL',
-      value: {
-        slug: this.bungeeCord.slug,
-        name: this.bungeeCord.name,
-        isActive: this.bungeeCord.isActive,
-        running: this.bungeeCord.status,
-        monitoring: this.bungeeCord.monitorHistory[this.bungeeCord.monitorHistory.length - 1],
-        lastBackup: {
-          date: date,
-          size: size
-        }
-      }
-    }
+  serverDetail(slug) {
+    let server = this.spigotServers[slug];
+    return this.detail(server);
   }
 
-  subscribe(client, channel) {
+  subscribe(client, channel, param) {
     switch (channel) {
       case 'SERVERS_DETAIL':
-        client.send(JSON.stringify(this.bungeeDetail()), (err) => {});
-        this.bungeeCord.subscribe(client, 'SERVER_DETAIL');
 
         Object.keys(this.spigotServers).forEach((slug) => {
           let server = this.spigotServers[slug];
@@ -229,16 +211,28 @@ class ServerNetwork {
           server.subscribe(client, 'SERVER_DETAIL');
         })
         break;
+      case 'SERVER_CONSOLE':
+        let server = this.spigotServers[param.slug];
+        if (server) {
+          server.subscribe(client, 'SERVER_CONSOLE');
+        }
+        break;
     }
   }
 
   unsubscribe(client, channel) {
     switch (channel) {
       case 'SERVERS_DETAIL':
-        this.bungeeCord.unsubscribe(client, 'SERVER_DETAIL');
         Object.keys(this.spigotServers).forEach((slug) => {
+          let server = this.spigotServers[slug];
           server.unsubscribe(client, 'SERVER_DETAIL');
         })
+        break;
+      case 'SERVER_CONSOLE':
+        let server = this.spigotServers[param.slug];
+        if (server) {
+          server.unsubscribe(client, 'SERVER_CONSOLE');
+        }
         break;
     }
   }
