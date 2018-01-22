@@ -160,6 +160,10 @@ class ServerNetwork {
     return this.spigotServers[slug].backup();
   }
 
+  commandServer(slug, command) {
+    return this.spigotServers[slug].executeCommand(command);
+  }
+
   serversList() {
     return {
       servers: Object.keys(this.spigotServers)
@@ -220,7 +224,7 @@ class ServerNetwork {
     }
   }
 
-  unsubscribe(client, channel) {
+  unsubscribe(client, channel, param) {
     switch (channel) {
       case 'SERVERS_DETAIL':
         Object.keys(this.spigotServers).forEach((slug) => {

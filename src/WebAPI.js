@@ -34,6 +34,9 @@ class WebAPI {
         case 'UNSUBSCRIBE_SERVER_CONSOLE':
           this.serverNetwork.unsubscribe(ws, 'SERVER_CONSOLE', data.value);
           break;
+        case 'COMMAND':
+          this.serverNetwork.commandServer(data.value.slug, data.value.command);
+          break;
       }
     });
 
