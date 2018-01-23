@@ -156,6 +156,10 @@ class ServerNetwork {
     return this.spigotServers[slug].restart();
   }
 
+  killServer(slug) {
+    return this.spigotServers[slug].kill();
+  }
+
   backupServer(slug) {
     return this.spigotServers[slug].backup();
   }
@@ -206,6 +210,7 @@ class ServerNetwork {
   }
 
   subscribe(client, channel, param) {
+    let server;
     switch (channel) {
       case 'SERVERS_DETAIL':
 
@@ -216,15 +221,23 @@ class ServerNetwork {
         })
         break;
       case 'SERVER_CONSOLE':
-        let server = this.spigotServers[param.slug];
+        server = this.spigotServers[param.slug];
         if (server) {
           server.subscribe(client, 'SERVER_CONSOLE');
+        }
+        break;
+      case 'SERVER_DETAIL':
+        server = this.spigotServers[param.slug];
+        if (server) {
+          client.send(JSON.stringify(this.serverDetail(param.slug)), (err) => {});
+          server.subscribe(client, 'SERVER_DETAIL');
         }
         break;
     }
   }
 
   unsubscribe(client, channel, param) {
+    let server;
     switch (channel) {
       case 'SERVERS_DETAIL':
         Object.keys(this.spigotServers).forEach((slug) => {
@@ -233,9 +246,15 @@ class ServerNetwork {
         })
         break;
       case 'SERVER_CONSOLE':
-        let server = this.spigotServers[param.slug];
+        server = this.spigotServers[param.slug];
         if (server) {
           server.unsubscribe(client, 'SERVER_CONSOLE');
+        }
+        break;
+      case 'SERVER_DETAIL':
+        server = this.spigotServers[param.slug];
+        if (server) {
+          server.unsubscribe(client, 'SERVER_DETAIL');
         }
         break;
     }

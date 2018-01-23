@@ -199,9 +199,12 @@ class SpigotServer extends EventEmitter {
 
         this.process.on('exit', (code) => {
           this.setRunning('STOPPED');
+          this.isRunning = false;
+          this.process = null;
+          if (this.monitorProcess != null) {
+            this.stopMonitoring();
+          }
           if (code === 0) {
-            this.isRunning = false;
-            this.process = null;
             winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped successfully`);
           } else {
             winston.info(`SpigotServer "${this.name}"(${this.slug}) stopped with error code ${code}`);
@@ -404,10 +407,6 @@ class SpigotServer extends EventEmitter {
 
       this.setRunning('STOPPING');
 
-      if (this.monitorProcess != null) {
-        this.stopMonitoring();
-      }
-
       this.process.on('exit', (code) => {
         resolve();
       });
@@ -447,6 +446,19 @@ class SpigotServer extends EventEmitter {
         resolve();
       })
     })
+  }
+
+  /**
+   * KILL the server
+   * @return {}
+   */
+  kill() {
+    if (!this.isRunning) {
+      winston.warn(`Tried to kill SpigotServer "${this.name}"(${this.slug}) but it is not running`);
+      return;
+    }
+
+    this.process.kill('SIGKILL');
   }
 
   /**
