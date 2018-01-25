@@ -1,14 +1,51 @@
 const WebSocket = require('ws');
-const winston = require('winston')
+const winston = require('winston');
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const crypto = require('crypto');
 
 class WebAPI {
   constructor(serverNetwork) {
     this.serverNetwork = serverNetwork;
+
+    const adapter = new FileSync('users.json');
+    this.db = low(adapter);
   }
 
   start() {
+    this.db.defaults({
+      'users': {}
+    }).write();
     this.wss = new WebSocket.Server({port: 3001});
-    this.wss.on('connection', this.handleConnection.bind(this));
+    this.wss.on('connection', this.handleAuth.bind(this));
+  }
+
+  handleAuth(ws) {
+    const authHandler = (value) => {
+      const data = JSON.parse(value);
+      if (!data || !data.value) {
+        return;
+      }
+      const { username, password } = data.value;
+      const user = this.db.get(`users.${username}`).value();
+
+      if (user && user.password === password) {
+        ws.user = user;
+        ws.removeListener('message', authHandler);
+        this.handleConnection(ws);
+
+        ws.send(JSON.stringify({
+          type: 'AUTH',
+          value: user
+        }));
+      } else {
+        ws.close();
+      }
+    }
+    ws.on('message', authHandler);
+    ws.on('error', (err) => {
+      ws.close()
+    })
   }
 
   handleConnection(ws) {
@@ -57,11 +94,6 @@ class WebAPI {
           break;
       }
     });
-
-    ws.on('error', (err) => {
-      console.log(err);
-      ws.close()
-    })
   }
 
   stop() {

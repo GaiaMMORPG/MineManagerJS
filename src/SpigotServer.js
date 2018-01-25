@@ -216,6 +216,7 @@ class SpigotServer extends EventEmitter {
           const ls = line.toString();
           this.console.push(ls);
 
+          let del = [];
           this.consoleSubscribers.forEach((client) => {
             client.send(JSON.stringify({
               type: 'SERVER_CONSOLE_LINE',
@@ -227,8 +228,11 @@ class SpigotServer extends EventEmitter {
               if (!err) {
                 return;
               }
-              remove(this.consoleSubscribers, client);
+              del.push(client);
             })
+          });
+          del.forEach((client) => {
+            remove(this.consoleSubscribers, client);
           });
 
           this.emit('stdout', ls);
@@ -286,6 +290,7 @@ class SpigotServer extends EventEmitter {
    */
   playerLogin(name, ip) {
     this.players[name] = ip;
+    let del = [];
     this.playersSubscribers.forEach((client) => {
       client.send(JSON.stringify({
         type: 'SERVER_PLAYER_LOGIN',
@@ -298,8 +303,11 @@ class SpigotServer extends EventEmitter {
         if (!err) {
           return;
         }
-        remove(this.playersSubscribers, client);
+        del.push(client);
       })
+    });
+    del.forEach((client) => {
+      remove(this.playersSubscribers, client);
     });
   }
 
@@ -309,6 +317,7 @@ class SpigotServer extends EventEmitter {
    * @return {}
    */
   playerLogout(name) {
+    let del = [];
     this.playersSubscribers.forEach((client) => {
       client.send(JSON.stringify({
         type: 'SERVER_PLAYER_LOGOUT',
@@ -321,8 +330,11 @@ class SpigotServer extends EventEmitter {
         if (!err) {
           return;
         }
-        remove(this.playersSubscribers, client);
+        del.push(client);
       })
+    });
+    del.forEach((client) => {
+      remove(this.playersSubscribers, client);
     });
     delete this.players[name];
   }
@@ -374,6 +386,7 @@ class SpigotServer extends EventEmitter {
         }
         this.monitorHistory.push(raw);
 
+        let del = [];
         this.monitorSubscribers.forEach((client) => {
           client.send(JSON.stringify({
             type: 'SERVER_MONITORING',
@@ -385,8 +398,11 @@ class SpigotServer extends EventEmitter {
             if (!err) {
               return;
             }
-            remove(this.monitorSubscribers, client);
+            del.push(client);
           })
+        });
+        del.forEach((client) => {
+          remove(this.monitorSubscribers, client);
         });
     });
   }
@@ -515,6 +531,7 @@ class SpigotServer extends EventEmitter {
                   size: size
                 });
 
+                let del = [];
                 this.backupsSubscribers.forEach((client) => {
                   client.send(JSON.stringify({
                     type: 'SERVER_BACKUP',
@@ -527,8 +544,11 @@ class SpigotServer extends EventEmitter {
                     if (!err) {
                       return;
                     }
-                    remove(this.backupsSubscribers, client);
+                    del.push(client);
                   })
+                });
+                del.forEach((client) => {
+                  remove(this.backupsSubscribers, client);
                 });
 
                 resolve();
@@ -577,6 +597,7 @@ class SpigotServer extends EventEmitter {
 
   setActive(isActive) {
     this.isActive = isActive;
+    let del = [];
     this.isActiveSubscribers.forEach((client) => {
       client.send(JSON.stringify({
         type: 'SERVER_ACTIVE',
@@ -588,13 +609,17 @@ class SpigotServer extends EventEmitter {
         if (!err) {
           return;
         }
-        remove(this.isActiveSubscribers, client);
+        del.push(client);
       })
+    });
+    del.forEach((client) => {
+      remove(this.isActiveSubscribers, client);
     });
   }
 
   setRunning(status) {
     this.status = status;
+    let del = [];
     this.isRunningSubscribers.forEach((client) => {
       client.send(JSON.stringify({
         type: 'SERVER_RUNNING',
@@ -606,8 +631,11 @@ class SpigotServer extends EventEmitter {
         if (!err) {
           return;
         }
-        remove(this.isRunningSubscribers, client);
+        del.push(client);
       })
+    });
+    del.forEach((client) => {
+      remove(this.isRunningSubscribers, client);
     });
   }
 
