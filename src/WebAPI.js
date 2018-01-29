@@ -16,7 +16,10 @@ class WebAPI {
     this.db.defaults({
       'users': {}
     }).write();
-    this.wss = new WebSocket.Server({port: 3001});
+    this.wss = new WebSocket.Server({
+      host: '127.0.0.1',
+      port: 2334
+    });
     this.wss.on('connection', this.handleAuth.bind(this));
   }
 
