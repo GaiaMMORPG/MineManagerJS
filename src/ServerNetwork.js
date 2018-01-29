@@ -77,6 +77,22 @@ class ServerNetwork {
         .value();
       Promise.all(startPromises).then(() => {
         resolve();
+      });
+    });
+  }
+
+  reload() {
+    let stopPromises = [];
+    Object.keys(this.spigotServers).forEach((slug) => {
+      if (this.spigotServers[slug].isRunning) {
+        stopPromises.push(this.stopServer(slug));
+      }
+    });
+
+    Promise.all(stopPromises).then(() => {
+      this.spigotServers = {};
+      this.loadBungee().then(() => {
+        return this.loadServers();
       })
     });
   }

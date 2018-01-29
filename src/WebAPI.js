@@ -21,27 +21,79 @@ class WebAPI {
   }
 
   handleAuth(ws) {
+    const authSuccessful = (user, token, expires) => {
+      ws.user = user;
+      ws.user.token = token;
+      ws.user.expires = expires;
+      ws.removeListener('message', authHandler);
+      this.handleConnection(ws);
+
+      ws.send(JSON.stringify({
+        type: 'AUTH_SUCCESS',
+        value: {
+          username: user.username,
+          role: user.role,
+          token: token,
+          expires: expires
+        }
+      }), (err) => {});
+    };
+
+    const authFailed = () => {
+      ws.send(JSON.stringify({
+        type: 'AUTH_FAILED',
+      }), (err) => {});
+    };
+
+    const authTokenFailed = () => {
+      ws.send(JSON.stringify({
+        type: 'AUTH_TOKEN_FAILED',
+      }), (err) => {});
+    };
+
     const authHandler = (value) => {
       const data = JSON.parse(value);
       if (!data || !data.value) {
         return;
       }
-      const { username, password } = data.value;
-      const user = this.db.get(`users.${username}`).value();
 
-      if (user && user.password === password) {
-        ws.user = user;
-        ws.removeListener('message', authHandler);
-        this.handleConnection(ws);
+      const { username, password, token } = data.value;
+      const user = this.db.get(`users.${username}`).cloneDeep().value();
 
-        ws.send(JSON.stringify({
-          type: 'AUTH',
-          value: user
-        }));
+      if (token) {
+        if (token === user.token.value) {
+          if (Date.now() > user.token.expires) {
+            authTokenFailed();
+          } else {
+            authSuccessful(user, token, user.token.expires);
+          }
+        } else {
+          authTokenFailed();
+        }
+      } else if (user && user.password === password) {
+        crypto.randomBytes(32, (err, buf) => {
+          if (err) {
+            authFailed();
+            return;
+          }
+
+          const token = buf.toString('hex');
+          const expires = Date.now()+86400000;
+
+          this.db.get(`users.${username}`)
+            .set('token', {
+              value: token,
+              expires: expires
+            })
+            .write();
+
+          authSuccessful(user, token, expires);
+        });
       } else {
-        ws.close();
+        authFailed();
       }
-    }
+    };
+
     ws.on('message', authHandler);
     ws.on('error', (err) => {
       ws.close()
@@ -53,6 +105,9 @@ class WebAPI {
       let data = JSON.parse(value);
       console.log(data);
       switch (data.type) {
+        case 'RELOAD_WRAPPER':
+          this.serverNetwork.reload()
+          break;
         case 'REQUEST_SERVERS_LIST':
           ws.send(JSON.stringify({
             type: 'SERVERS_LIST',
