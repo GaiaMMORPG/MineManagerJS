@@ -1,3 +1,7 @@
+if (process.env.NODE_ENV !== 'production') {
+  require('longjohn');
+}
+
 const readline = require('readline');
 const ServerNetwork = require('./ServerNetwork')
 const WebAPI = require('./WebAPI');

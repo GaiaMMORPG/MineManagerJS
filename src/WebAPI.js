@@ -115,7 +115,7 @@ class WebAPI {
           ws.send(JSON.stringify({
             type: 'SERVERS_LIST',
             value: this.serverNetwork.serversList()
-          }));
+          }), (err) => {});
           break;
         case 'SUBSCRIBE_SERVERS_DETAIL':
           this.serverNetwork.subscribe(ws, 'SERVERS_DETAIL');
