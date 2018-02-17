@@ -211,6 +211,7 @@ class SpigotServer extends EventEmitter {
           }
         });
 
+        this.process.stdout.on('error', (err) => {});
         this.stdoutSplitter = this.process.stdout.pipe(StreamSplitter('\n'));
         this.stdoutSplitter.on('error', (err) => {});
         this.stdoutSplitter.on('token', (line) => {
@@ -366,6 +367,7 @@ class SpigotServer extends EventEmitter {
       this.monitorProcess = null;
     })
 
+    this.monitorProcess.stdout.on('error', (err) => {});
     let stdoutSplitter = this.monitorProcess.stdout.pipe(StreamSplitter('\n'));
     stdoutSplitter.on('error', (err) => {});
     stdoutSplitter.on("token", (line) => {

@@ -63,7 +63,7 @@ class WebAPI {
       const { username, password, token } = data.value;
       const user = this.db.get(`users.${username}`).cloneDeep().value();
 
-      if (token) {
+      if (user && token) {
         if (token === user.token.value) {
           if (Date.now() > user.token.expires) {
             authTokenFailed();
